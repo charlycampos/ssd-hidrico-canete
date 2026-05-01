@@ -1,0 +1,34 @@
+# Entorno virtual Python
+venv/
+env/
+.env
+
+# Modelos entrenados (se regeneran automáticamente)
+modelo_rf.pkl
+modelo_rf_meta.pkl
+
+# Archivos NetCDF (pesados, fuente original PISCO)
+netcdf/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Streamlit cache
+.streamlit/
+
+# IDEs
+.vscode/
+.idea/
+*.code-workspace
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Documentación interna (PDFs del profesor)
+documentacion solicitada/
+DOCUMENTACION SOLICITADA/
