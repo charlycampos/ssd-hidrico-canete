@@ -1014,3 +1014,282 @@ El mapa de calor muestra qué comunidades verán reducida su asignación en los 
         st.warning(f"🟡 **Precaución — {mes_seleccionado}:** Caudal de {q_pred_sel:.1f} m³/s por debajo del promedio. El algoritmo IVH+K-Means ajusta la distribución favoreciendo zonas de alta vulnerabilidad.")
     else:
         st.success(f"🟢 **Condición normal — {mes_seleccionado}:** Con {q_pred_sel:.1f} m³/s disponibles el sistema distribuye equitativamente según IVH. Gini esperado: {_:.4f}")
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# 🎯 TAB 3 — EL PROBLEMA
+# ════════════════════════════════════════════════════════════════════════════════
+with t_prob:
+    st.markdown("""
+    <div class="hero">
+      <h1>🎯 ¿Cuál es el problema que resuelve este sistema?</h1>
+      <p>Evidencia cuantitativa de la distribución inequitativa del agua en la Cuenca Cañete — Datos PISCO 1981–2020 + ANA 2023–2026</p>
+    </div>""", unsafe_allow_html=True)
+
+    # ── KPIs del problema ─────────────────────────────────────────────────────
+    df_antes_p = df_com.copy()
+    km_form_p  = df_antes_p[df_antes_p['formalizada']]['km'].sum()
+    df_antes_p['asig'] = np.where(df_antes_p['formalizada'],
+                                   df_antes_p['km'] / km_form_p * q_dist, 0.0)
+    g_sin = gini(df_antes_p['asig'].values)
+    df_con_p, g_con = distribuir(q_dist, pesos, df_com)
+    n_excl = int((~df_com['formalizada']).sum())
+
+    k1, k2, k3, k4 = st.columns(4)
+    with k1:
+        st.markdown(f"""<div class="kpi-card rojo">
+            <div class="kpi-val">{g_sin:.3f}</div>
+            <div class="kpi-lab">Gini SIN SSD</div>
+            <div class="kpi-sub">{n_excl} comunidades reciben 0 m³/s</div>
+        </div>""", unsafe_allow_html=True)
+    with k2:
+        st.markdown(f"""<div class="kpi-card verde">
+            <div class="kpi-val">{g_con:.3f}</div>
+            <div class="kpi-lab">Gini CON SSD</div>
+            <div class="kpi-sub">Todas las comunidades incluidas</div>
+        </div>""", unsafe_allow_html=True)
+    with k3:
+        mejora_p = (g_sin - g_con) / g_sin * 100 if g_sin > 0 else 0
+        st.markdown(f"""<div class="kpi-card verde">
+            <div class="kpi-val">{mejora_p:.1f}%</div>
+            <div class="kpi-lab">Mejora en equidad</div>
+            <div class="kpi-sub">Reducción del índice Gini</div>
+        </div>""", unsafe_allow_html=True)
+    with k4:
+        st.markdown(f"""<div class="kpi-card naranja">
+            <div class="kpi-val">{n_excl}</div>
+            <div class="kpi-lab">Comunidades excluidas</div>
+            <div class="kpi-sub">Sin formalización ANA</div>
+        </div>""", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Curva de Lorenz ───────────────────────────────────────────────────────
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown('<div class="sec-title">📉 Curva de Lorenz — Antes vs. Después del SSD</div>', unsafe_allow_html=True)
+        xa, ya = lorenz(df_antes_p['asig'].values)
+        xd, yd = lorenz(df_con_p['asig'].values)
+        n_pts  = len(xa)
+        fig_lorenz = go.Figure()
+        fig_lorenz.add_trace(go.Scatter(x=[0,1], y=[0,1], name='Igualdad perfecta',
+            line=dict(dash='dash', color='gray', width=1.5)))
+        fig_lorenz.add_trace(go.Scatter(x=xa.tolist(), y=ya.tolist(),
+            name=f'SIN SSD (Gini={g_sin:.3f})',
+            line=dict(color=PALETA['rojo_c'], width=2.5),
+            fill='tozeroy', fillcolor='rgba(229,57,53,0.08)'))
+        fig_lorenz.add_trace(go.Scatter(x=xd.tolist(), y=yd.tolist(),
+            name=f'CON SSD (Gini={g_con:.3f})',
+            line=dict(color=PALETA['verde_c'], width=2.5),
+            fill='tozeroy', fillcolor='rgba(67,160,71,0.08)'))
+        fig_lorenz.update_layout(
+            height=380, margin=dict(t=20,b=40,l=50,r=20),
+            xaxis_title='Proporción acumulada de comunidades',
+            yaxis_title='Proporción acumulada de agua',
+            legend=dict(x=0.01, y=0.99, font=dict(size=11)),
+            plot_bgcolor='white', paper_bgcolor='white')
+        st.plotly_chart(fig_lorenz, use_container_width=True)
+        st.markdown(f"""<div class="alerta-box alerta-{'critico' if g_sin > 0.4 else 'deficit'}">
+            📊 <b>Interpretación:</b> La curva roja muestra la distribución actual — el área entre la curva y la diagonal de igualdad perfecta representa la inequidad (Gini={g_sin:.3f}). 
+            Con el SSD activado, la curva verde se acerca a la diagonal, reduciendo la inequidad un <b>{mejora_p:.1f}%</b>. 
+            {n_excl} comunidades que antes recibían <b>0 m³/s</b> ahora participan equitativamente en la distribución.
+        </div>""", unsafe_allow_html=True)
+
+    # ── Índice de Sequía SPI ──────────────────────────────────────────────────
+    with col2:
+        st.markdown('<div class="sec-title">🌡️ Índice de Sequía SPI — ANA Cañete 2023–2026</div>', unsafe_allow_html=True)
+        ana_spi = ana_m.copy()
+        mu  = ana_spi['medio'].mean()
+        sig = ana_spi['medio'].std()
+        ana_spi['spi'] = (ana_spi['medio'] - mu) / sig if sig > 0 else 0
+        colores_spi = ['#E53935' if v < -1.5 else '#FB8C00' if v < -1.0
+                       else '#FDD835' if v < 0 else '#43A047' if v < 1.0
+                       else '#1E88E5' for v in ana_spi['spi']]
+        fig_spi = go.Figure()
+        fig_spi.add_hline(y=0,   line_dash='solid', line_color='gray', line_width=1)
+        fig_spi.add_hline(y=-1,  line_dash='dash',  line_color=PALETA['naranja_c'],
+                          line_width=1, annotation_text='Sequía moderada', annotation_position='right')
+        fig_spi.add_hline(y=-1.5,line_dash='dash',  line_color=PALETA['rojo_c'],
+                          line_width=1, annotation_text='Sequía severa',   annotation_position='right')
+        fig_spi.add_trace(go.Bar(
+            x=ana_spi['fecha'], y=ana_spi['spi'],
+            marker_color=colores_spi,
+            hovertemplate='%{x|%b %Y}<br>SPI: %{y:.2f}<extra></extra>'))
+        fig_spi.update_layout(
+            height=380, margin=dict(t=20,b=40,l=50,r=80),
+            xaxis_title='Fecha', yaxis_title='SPI (z-score)',
+            plot_bgcolor='white', paper_bgcolor='white')
+        st.plotly_chart(fig_spi, use_container_width=True)
+
+        n_sequia = int((ana_spi['spi'] < -1.0).sum())
+        pct_sequia = n_sequia / len(ana_spi) * 100
+        nivel = 'crítico' if pct_sequia > 40 else 'deficit' if pct_sequia > 25 else 'normal'
+        st.markdown(f"""<div class="alerta-box alerta-{nivel}">
+            🌡️ <b>Interpretación:</b> De los {len(ana_spi)} meses analizados (2023–2026), 
+            <b>{n_sequia} ({pct_sequia:.0f}%)</b> registran sequía moderada a severa (SPI &lt; -1.0). 
+            Esta variabilidad climática no está incorporada en los esquemas de distribución actuales, 
+            agravando la inequidad en los períodos de menor caudal.
+        </div>""", unsafe_allow_html=True)
+
+    # ── Distribución por comunidad ANTES vs DESPUÉS ───────────────────────────
+    st.markdown('<div class="sec-title">📊 Asignación por comunidad — Antes vs. Después del SSD</div>', unsafe_allow_html=True)
+    df_comp = df_antes_p[['comision','provincia','formalizada','asig']].copy()
+    df_comp = df_comp.rename(columns={'asig':'Sin SSD (m³/s)'})
+    df_comp['Con SSD (m³/s)'] = df_con_p['asig'].values
+    df_comp['Variación'] = df_comp['Con SSD (m³/s)'] - df_comp['Sin SSD (m³/s)']
+    df_comp['Estado'] = df_comp['formalizada'].map({True:'✅ Formalizada', False:'⚠️ No formalizada'})
+
+    fig_comp = go.Figure()
+    fig_comp.add_trace(go.Bar(name='SIN SSD', x=df_comp['comision'],
+        y=df_comp['Sin SSD (m³/s)'], marker_color=PALETA['rojo_c'], opacity=0.8))
+    fig_comp.add_trace(go.Bar(name='CON SSD', x=df_comp['comision'],
+        y=df_comp['Con SSD (m³/s)'], marker_color=PALETA['verde_c'], opacity=0.8))
+    fig_comp.update_layout(
+        barmode='group', height=380, margin=dict(t=20,b=120,l=60,r=20),
+        xaxis=dict(tickangle=-45, tickfont=dict(size=9)),
+        yaxis_title='Asignación (m³/s)',
+        legend=dict(x=0.01, y=0.99),
+        plot_bgcolor='white', paper_bgcolor='white')
+    st.plotly_chart(fig_comp, use_container_width=True)
+
+    st.markdown(f"""<div class="alerta-box alerta-{'critico' if g_sin > 0.4 else 'normal'}">
+        📌 <b>Conclusión del análisis:</b> El sistema actual excluye a <b>{n_excl} comunidades</b> no formalizadas 
+        que reciben <b>0 m³/s</b> independientemente del caudal disponible. El SSD con IVH + K-Means incorpora a 
+        todas las comunidades, priorizando las de mayor vulnerabilidad hídrica. El resultado es una reducción del 
+        coeficiente de Gini de <b>{g_sin:.3f}</b> a <b>{g_con:.3f}</b> — una mejora del <b>{mejora_p:.1f}%</b> 
+        en equidad distributiva sobre el mismo caudal disponible.
+    </div>""", unsafe_allow_html=True)
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# 📋 TAB 4 — METODOLOGÍA PIIT
+# ════════════════════════════════════════════════════════════════════════════════
+with t_met:
+    st.markdown("""
+    <div class="hero">
+      <h1>📋 Metodología del Proyecto — PIIT 2026</h1>
+      <p>Proyecto Integrador de Innovación Tecnológica · UNAC · Doctorado en Ingeniería de Sistemas · Eje: Agrotecnología y Sostenibilidad</p>
+    </div>""", unsafe_allow_html=True)
+
+    col1, col2 = st.columns([1,1])
+
+    with col1:
+        st.markdown('<div class="sec-title">🔄 Metodología Scrumban — Sprints del Proyecto</div>', unsafe_allow_html=True)
+        sprints = [
+            ("Sprint 1 · 18–25 Abr 2026", "Diagnóstico y Evidencia", [
+                "✅ Carga y procesamiento 471 archivos PISCO",
+                "✅ Integración datos ANA 2023–2026",
+                "✅ Cálculo Gini=0.55 y curva de Lorenz",
+                "✅ Índice SPI de sequía",
+                "✅ Reestructura app 4 módulos narrativos",
+            ], PALETA['azul_c']),
+            ("Sprint 2 · 26 Abr–03 May 2026", "Solución con Ciencia de Datos", [
+                "✅ Sankey interactivo antes/después",
+                "✅ Random Forest R²=0.67 + joblib",
+                "✅ IVH 5 dimensiones + K-Means 3 clusters",
+                "✅ Gini 0.55→0.22 (mejora 60%)",
+                "✅ Publicación GitHub",
+            ], PALETA['verde_c']),
+        ]
+        for titulo, subtitulo, tareas, color in sprints:
+            st.markdown(f"""
+            <div style="border-left:4px solid {color};padding:12px 16px;margin:10px 0;
+                        background:#f9f9f9;border-radius:0 8px 8px 0;">
+                <b style="color:{color}">{titulo}</b><br>
+                <span style="font-size:.85rem;color:#555">{subtitulo}</span>
+                <ul style="margin:8px 0 0 0;padding-left:18px;font-size:.85rem">
+                    {''.join(f"<li>{t}</li>" for t in tareas)}
+                </ul>
+            </div>""", unsafe_allow_html=True)
+
+        st.markdown('<div class="sec-title" style="margin-top:16px">📐 Fases PIIT — F1 a F6</div>', unsafe_allow_html=True)
+        fases = [
+            ("F1", "Identificación del Problema", "Sem 1–3", "✅", PALETA['azul_c']),
+            ("F2", "Revisión Estado del Arte",     "Sem 4–6", "✅", PALETA['azul_c']),
+            ("F3", "Diseño de la Solución",        "Sem 7–9", "✅", PALETA['verde_c']),
+            ("F4", "Desarrollo e Implementación",  "Sem 10–13","✅", PALETA['verde_c']),
+            ("F5", "Evaluación y KPIs",            "Sem 14–15","⚠️", PALETA['naranja_c']),
+            ("F6", "Diseminación — Paper JCR Q2",  "Sem 16",  "📌", PALETA['rojo_c']),
+        ]
+        for cod, nombre, sem, estado, color in fases:
+            st.markdown(f"""
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;
+                        margin:4px 0;background:#f5f5f5;border-radius:8px;font-size:.88rem;">
+                <span style="background:{color};color:white;border-radius:50%;
+                             width:28px;height:28px;display:flex;align-items:center;
+                             justify-content:center;font-weight:700;flex-shrink:0">{cod}</span>
+                <span style="flex:1"><b>{nombre}</b><br>
+                <span style="color:#888;font-size:.8rem">{sem}</span></span>
+                <span style="font-size:1.1rem">{estado}</span>
+            </div>""", unsafe_allow_html=True)
+
+    with col2:
+        st.markdown('<div class="sec-title">⚙️ Pila Tecnológica (Tech Stack)</div>', unsafe_allow_html=True)
+        stack = [
+            ("🐍 Python 3.11",          "Lenguaje principal",                    PALETA['azul_c']),
+            ("📊 Pandas · NumPy",        "Procesamiento de datos",               PALETA['azul_c']),
+            ("🗺️ GeoPandas",             "Datos geoespaciales y shapefiles",     PALETA['azul_c']),
+            ("🌲 Scikit-learn",          "Random Forest · K-Means · Scaler",     PALETA['naranja_c']),
+            ("💾 Joblib",                "Persistencia del modelo RF",            PALETA['naranja_c']),
+            ("📈 Plotly",                "Sankey · Lorenz · Series temporales",  PALETA['verde_c']),
+            ("🖥️ Streamlit",             "Interfaz web interactiva",             PALETA['verde_c']),
+            ("🗄️ PISCO HyM GR2M v1.1",  "471 archivos TXT · 39 subcuencas",     PALETA['gris']),
+            ("📡 ANA-Cañete",            "Datos observados 2023–2026",           PALETA['gris']),
+            ("🏛️ AMCRD-MINAGRI",         "Padrón de comunidades campesinas",     PALETA['gris']),
+            ("🐙 GitHub",                "Repositorio público y control versiones",PALETA['gris']),
+        ]
+        for nombre, desc, color in stack:
+            st.markdown(f"""
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;
+                        margin:4px 0;background:#f5f5f5;border-radius:8px;font-size:.87rem;
+                        border-left:3px solid {color};">
+                <span style="flex:1"><b>{nombre}</b><br>
+                <span style="color:#777;font-size:.8rem">{desc}</span></span>
+            </div>""", unsafe_allow_html=True)
+
+        st.markdown('<div class="sec-title" style="margin-top:16px">📊 KPIs del PIIT</div>', unsafe_allow_html=True)
+        df_antes_m = df_com.copy()
+        km_f = df_antes_m[df_antes_m['formalizada']]['km'].sum()
+        df_antes_m['asig'] = np.where(df_antes_m['formalizada'],
+                                       df_antes_m['km']/km_f*q_dist, 0.0)
+        g_sin_m = gini(df_antes_m['asig'].values)
+        _, g_con_m = distribuir(q_dist, pesos, df_com)
+        mejora_m = (g_sin_m - g_con_m)/g_sin_m*100 if g_sin_m > 0 else 0
+
+        kpis_met = [
+            ("Gini SIN SSD",          f"{g_sin_m:.3f}", "Línea base inequidad", "rojo"),
+            ("Gini CON SSD",          f"{g_con_m:.3f}", "Con IVH + K-Means",    "verde"),
+            ("Mejora equidad",         f"{mejora_m:.1f}%","Reducción del Gini",  "verde"),
+            ("R² Random Forest",       "0.67",           "Validación ANA",       "naranja"),
+            ("ROI del proyecto",       "190.3%",         "Sobre S/. 31,000",     "azul"),
+        ]
+        for lab, val, sub, cls_k in kpis_met:
+            st.markdown(f"""<div class="kpi-card {cls_k}" style="height:90px;margin-bottom:8px">
+                <div class="kpi-val" style="font-size:1.4rem">{val}</div>
+                <div class="kpi-lab">{lab}</div>
+                <div class="kpi-sub">{sub}</div>
+            </div>""", unsafe_allow_html=True)
+
+    # ── Investigadores y repositorio ──────────────────────────────────────────
+    st.divider()
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown("""
+        **👨‍🔬 Investigadores**
+        - Mg. Charly Hernan Campos Guerra
+        - Mg. Eber Angel Quispe Paco
+        """)
+    with c2:
+        st.markdown("""
+        **🏛️ Institución**
+        - UNAC — Universidad Nacional del Callao
+        - Doctorado en Ingeniería de Sistemas
+        - Eje: Agrotecnología y Sostenibilidad
+        """)
+    with c3:
+        st.markdown("""
+        **📦 Repositorio**
+        - [github.com/charlycampos/ssd-hidrico-canete](https://github.com/charlycampos/ssd-hidrico-canete)
+        - ISO 56002:2019 · ISO 31000:2018
+        - APA 7ma edición
+        """)
